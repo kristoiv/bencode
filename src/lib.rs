@@ -5,21 +5,31 @@ use anyhow::{anyhow, Result};
 mod decode;
 mod encode;
 
-use decode::*;
-use encode::*;
+pub use decode::*;
+pub use encode::*;
 
+/// An intermediate value format that can be encoded or decoded
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
+    /// A length prefixed list of bytes
     Bytes(Vec<u8>),
+
+    /// A signed number (integer)
     Number(i64),
+
+    /// A list of other values of any type
     List(Vec<Value>),
+
+    /// A map of other values of any type, with keys represented as a length prefixed list of bytes
     Map(Vec<(Vec<u8>, Value)>),
 }
 
+/// Bencode encoder trait
 pub trait BencodeEncode {
     fn bencode_encode(&self) -> Result<Vec<u8>>;
 }
 
+/// Generic Bencode encoder implementation for any type that can be transformed to our intermediate Value type
 impl<T> BencodeEncode for T
 where
     T: Into<Value> + Clone,
@@ -110,6 +120,7 @@ where
     }
 }
 
+/// Bencode decoder trait
 pub trait BencodeDecode<T>
 where
     Self: Sized,
@@ -118,6 +129,7 @@ where
     fn from_bencode(val: &Vec<u8>) -> Result<Self>;
 }
 
+/// Generic Bencode decoder implementation for any type that can be transformed into from our intermediate Value type
 impl<T> BencodeDecode<T> for T
 where
     T: TryFrom<Value>,
