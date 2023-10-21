@@ -70,11 +70,22 @@ impl From<i64> for Value {
     }
 }
 
-impl From<Vec<u8>> for Value {
+impl<T: Into<Value> + Clone> From<Vec<T>> for Value {
+    fn from(value: Vec<T>) -> Self {
+        Value::List(
+            value
+                .iter()
+                .map(|it| it.clone().into())
+                .collect::<Vec<Value>>(),
+        )
+    }
+}
+
+/*impl From<Vec<u8>> for Value {
     fn from(value: Vec<u8>) -> Self {
         Value::Bytes(value)
     }
-}
+}*/
 
 pub trait BencodeDecode<T>
 where
@@ -184,103 +195,35 @@ impl TryFrom<Value> for i64 {
     }
 }
 
-impl TryFrom<Value> for Vec<u8> {
+impl<T> TryFrom<Value> for Vec<T>
+where
+    T: TryFrom<Value>,
+    anyhow::Error: From<T::Error>,
+{
+    type Error = anyhow::Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::List(items) => {
+                let mut res = vec![];
+                for item in items {
+                    let t: T = item.try_into()?;
+                    res.push(t);
+                }
+                Ok(res)
+            }
+            _ => Err(anyhow!("decoded value had unexpected type: {:?}", value).into()),
+        }
+    }
+}
+
+/*impl TryFrom<Value> for Vec<u8> {
     type Error = anyhow::Error;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
             Value::Bytes(data) => Ok(data),
             _ => Err(anyhow!("decoded value had unexpected type: {:?}", value).into()),
-        }
-    }
-}
-
-/*impl<T> BencodeDecode<T> for u8 {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Number(num) => Ok(num as Self),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
-        }
-    }
-}
-
-impl<T> BencodeDecode<T> for u16 {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Number(num) => Ok(num as Self),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
-        }
-    }
-}
-
-impl<T> BencodeDecode<T> for u32 {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Number(num) => Ok(num as Self),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
-        }
-    }
-}
-
-impl<T> BencodeDecode<T> for u64 {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Number(num) => Ok(num as Self),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
-        }
-    }
-}
-
-/*impl<T> BencodeDecode<T> for i8 {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Number(num) => Ok(num as Self),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
-        }
-    }
-}*/
-
-impl<T> BencodeDecode<T> for i16 {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Number(num) => Ok(num as Self),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
-        }
-    }
-}
-
-impl<T> BencodeDecode<T> for i32 {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Number(num) => Ok(num as Self),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
-        }
-    }
-}
-
-impl<T> BencodeDecode<T> for i64 {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Number(num) => Ok(num as Self),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
-        }
-    }
-}
-
-impl<T> BencodeDecode<T> for Vec<u8> {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Bytes(bytes) => Ok(bytes),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
         }
     }
 }*/
@@ -796,10 +739,46 @@ mod tests {
         assert_eq!(vi32.bencode_encode().unwrap(), "i-32e".as_bytes().to_vec());
         assert_eq!(vi64.bencode_encode().unwrap(), "i-64e".as_bytes().to_vec());
 
-        let string = "some string value".to_owned().as_bytes().to_vec();
+        /*let string = "some string value".to_owned().as_bytes().to_vec();
         assert_eq!(
             string.bencode_encode().unwrap(),
             "17:some string value".as_bytes().to_vec()
+        );*/
+    }
+
+    #[test]
+    fn test_encode_from_vec_type() {
+        assert_eq!(
+            vec![100_u8, 100].bencode_encode().unwrap(),
+            "li100ei100ee".as_bytes().to_vec(),
+        );
+        assert_eq!(
+            vec![100_u16, 100].bencode_encode().unwrap(),
+            "li100ei100ee".as_bytes().to_vec(),
+        );
+        assert_eq!(
+            vec![100_u32, 100].bencode_encode().unwrap(),
+            "li100ei100ee".as_bytes().to_vec(),
+        );
+        assert_eq!(
+            vec![1337_u64, 1337].bencode_encode().unwrap(),
+            "li1337ei1337ee".as_bytes().to_vec(),
+        );
+        assert_eq!(
+            vec![100_i8, -100].bencode_encode().unwrap(),
+            "li100ei-100ee".as_bytes().to_vec(),
+        );
+        assert_eq!(
+            vec![100_i16, -100].bencode_encode().unwrap(),
+            "li100ei-100ee".as_bytes().to_vec(),
+        );
+        assert_eq!(
+            vec![100_i32, -100].bencode_encode().unwrap(),
+            "li100ei-100ee".as_bytes().to_vec(),
+        );
+        assert_eq!(
+            vec![1337_i64, -1337].bencode_encode().unwrap(),
+            "li1337ei-1337ee".as_bytes().to_vec(),
         );
     }
 
@@ -907,10 +886,46 @@ mod tests {
         assert_eq!(i32::from_bencode(&vi32).unwrap(), -32);
         assert_eq!(i64::from_bencode(&vi64).unwrap(), -64);
 
-        let string = "17:some string value".as_bytes().to_vec();
+        /*let string = "17:some string value".as_bytes().to_vec();
         assert_eq!(
             Vec::<u8>::from_bencode(&string).unwrap(),
             "some string value".to_owned().as_bytes().to_vec(),
+        );*/
+    }
+
+    #[test]
+    fn test_decode_to_vec_type() {
+        assert_eq!(
+            Vec::<u8>::from_bencode(&"li100ei100ee".as_bytes().to_vec()).unwrap(),
+            vec![100, 100]
+        );
+        assert_eq!(
+            Vec::<u16>::from_bencode(&"li100ei100ee".as_bytes().to_vec()).unwrap(),
+            vec![100, 100]
+        );
+        assert_eq!(
+            Vec::<u32>::from_bencode(&"li100ei100ee".as_bytes().to_vec()).unwrap(),
+            vec![100, 100]
+        );
+        assert_eq!(
+            Vec::<u64>::from_bencode(&"li1337ei1337ee".as_bytes().to_vec()).unwrap(),
+            vec![1337, 1337]
+        );
+        assert_eq!(
+            Vec::<i8>::from_bencode(&"li100ei-100ee".as_bytes().to_vec()).unwrap(),
+            vec![100, -100]
+        );
+        assert_eq!(
+            Vec::<i16>::from_bencode(&"li100ei-100ee".as_bytes().to_vec()).unwrap(),
+            vec![100, -100]
+        );
+        assert_eq!(
+            Vec::<i32>::from_bencode(&"li100ei-100ee".as_bytes().to_vec()).unwrap(),
+            vec![100, -100]
+        );
+        assert_eq!(
+            Vec::<i64>::from_bencode(&"li1337ei-1337ee".as_bytes().to_vec()).unwrap(),
+            vec![1337, -1337]
         );
     }
 }
