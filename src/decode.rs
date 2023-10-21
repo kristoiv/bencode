@@ -1,20 +1,21 @@
 use super::*;
 use anyhow::{anyhow, bail, Context, Result};
 
+/// Decode a bencoded vector of bytes into a Value (an intermediate format)
 pub fn decode(data: &Vec<u8>) -> Result<Value> {
     let mut decode_context = DecodeContext::new(data);
     loop {
         match decode_context.state() {
-            DecodeState::Initial | DecodeState::ListEntry | DecodeState::MapEntry(..) => {
+            DecodeState::Initial | DecodeState::ListElement | DecodeState::MapEntry(..) => {
                 decode_state_initial(&mut decode_context).context("decode_state_initial")?
             }
             DecodeState::Bytes => {
                 let val = decode_state_bytes(&mut decode_context).context("decode_state_bytes")?;
                 match decode_context.state() {
                     DecodeState::Initial => return Ok(val),
-                    DecodeState::ListEntry => {
-                        decode_state_listentry_decoded(&mut decode_context, val)
-                            .context("decode_state_listentry_decoded")?
+                    DecodeState::ListElement => {
+                        decode_state_list_element_decoded(&mut decode_context, val)
+                            .context("decode_state_list_element_decoded")?
                     }
                     // MapFinished in these context means entry-key found, move on to entry
                     DecodeState::MapFinished(..) => {
@@ -26,8 +27,8 @@ pub fn decode(data: &Vec<u8>) -> Result<Value> {
                     }
                     DecodeState::MapEntry(key) => {
                         let key = key.clone();
-                        decode_state_mapdata_decoded(&mut decode_context, &key, val)
-                            .context("decode_state_mapdata_decoded")?
+                        decode_state_map_entry_decoded(&mut decode_context, &key, val)
+                            .context("decode_state_map_entry_decoded")?
                     }
                     _ => {
                         panic!(
@@ -42,19 +43,19 @@ pub fn decode(data: &Vec<u8>) -> Result<Value> {
                     decode_state_number(&mut decode_context).context("decode_state_number")?;
                 match decode_context.state() {
                     DecodeState::Initial => return Ok(val),
-                    DecodeState::ListEntry => {
-                        decode_state_listentry_decoded(&mut decode_context, val)
-                            .context("decode_state_listentry_decoded")?
+                    DecodeState::ListElement => {
+                        decode_state_list_element_decoded(&mut decode_context, val)
+                            .context("decode_state_list_element_decoded")?
                     }
                     DecodeState::MapEntry(key) => {
                         let key = key.clone();
-                        decode_state_mapdata_decoded(&mut decode_context, &key, val)
-                            .context("decode_state_mapdata_decoded")?
+                        decode_state_map_entry_decoded(&mut decode_context, &key, val)
+                            .context("decode_state_map_entry_decoded")?
                     }
                     _ => {
                         panic!(
                             "unexpected state after reading number: {:?}",
-                            decode_context.state()
+                            decode_context.state(),
                         )
                     }
                 }
@@ -64,19 +65,19 @@ pub fn decode(data: &Vec<u8>) -> Result<Value> {
                 decode_context.pop_state();
                 match decode_context.state() {
                     DecodeState::Initial => return Ok(val.clone()),
-                    DecodeState::ListEntry => {
-                        decode_state_listentry_decoded(&mut decode_context, val)
-                            .context("decode_state_listentry_decoded")?
+                    DecodeState::ListElement => {
+                        decode_state_list_element_decoded(&mut decode_context, val)
+                            .context("decode_state_list_element_decoded")?
                     }
                     DecodeState::MapEntry(key) => {
                         let key = key.clone();
-                        decode_state_mapdata_decoded(&mut decode_context, &key, val)
-                            .context("decode_state_mapdata_decoded")?
+                        decode_state_map_entry_decoded(&mut decode_context, &key, val)
+                            .context("decode_state_map_entry_decoded")?
                     }
                     _ => {
                         panic!(
                             "unexpected state after reading list: {:?}",
-                            decode_context.state()
+                            decode_context.state(),
                         )
                     }
                 }
@@ -86,19 +87,19 @@ pub fn decode(data: &Vec<u8>) -> Result<Value> {
                 decode_context.pop_state();
                 match decode_context.state() {
                     DecodeState::Initial => return Ok(val.clone()),
-                    DecodeState::ListEntry => {
-                        decode_state_listentry_decoded(&mut decode_context, val)
-                            .context("decode_state_listentry_decoded")?
+                    DecodeState::ListElement => {
+                        decode_state_list_element_decoded(&mut decode_context, val)
+                            .context("decode_state_list_element_decoded")?
                     }
                     DecodeState::MapEntry(key) => {
                         let key = key.clone();
-                        decode_state_mapdata_decoded(&mut decode_context, &key, val)
-                            .context("decode_state_mapdata_decoded")?
+                        decode_state_map_entry_decoded(&mut decode_context, &key, val)
+                            .context("decode_state_map_entry_decoded")?
                     }
                     _ => {
                         panic!(
                             "unexpected state after reading map: {:?}",
-                            decode_context.state()
+                            decode_context.state(),
                         )
                     }
                 }
@@ -107,6 +108,7 @@ pub fn decode(data: &Vec<u8>) -> Result<Value> {
     }
 }
 
+/// The decode context holds all the required state for the state machine to operate
 struct DecodeContext<'a> {
     state_vec: Vec<DecodeState>,
     state_buffer: Vec<u8>,
@@ -115,6 +117,7 @@ struct DecodeContext<'a> {
 }
 
 impl<'a> DecodeContext<'a> {
+    /// Create the initial decode context
     fn new(data: &'a Vec<u8>) -> Self {
         DecodeContext {
             state_buffer: vec![],
@@ -124,12 +127,14 @@ impl<'a> DecodeContext<'a> {
         }
     }
 
+    /// Get the current state of decoding
     fn state(&mut self) -> &mut DecodeState {
         self.state_vec
             .last_mut()
             .expect("there should always be a valid state set")
     }
 
+    /// Get the parent decoding state of the current state, if it exists
     fn parent_state(&mut self) -> Option<&mut DecodeState> {
         let len = self.state_vec.len();
         if len < 2 {
@@ -139,44 +144,62 @@ impl<'a> DecodeContext<'a> {
         }
     }
 
+    /// Push a new decoding state, making it the current one
     fn push_state(&mut self, ds: DecodeState) {
         self.state_vec.push(ds);
     }
 
+    /// Pop off the current decoding state
     fn pop_state(&mut self) -> DecodeState {
         self.state_vec
             .pop()
             .expect("there should always be a valid state set")
     }
 
+    /// Peek at the next byte that will be decoded (if it exists), without moving the cursor
     fn peek_next(&self) -> Option<u8> {
         self.data.get(self.idx).map(|it| *it)
     }
 
+    /// Retrieve the next byte to decode (if it exists)
     fn next(&mut self) -> Option<u8> {
         let next = self.peek_next()?;
         self.idx += 1;
         Some(next)
     }
 
+    /// Retrieve the current offset of the cursor into the data we are decoding
     fn offset(&self) -> usize {
         self.idx
     }
 }
 
+/// The decode states are the different states of the state machine used for decoding
 #[derive(Debug, Clone)]
 enum DecodeState {
+    /// The initial state: indicates where to start, and when we should return the final value
     Initial,
+
+    /// Decode a length prefixed number of bytes
     Bytes,
-    // BytesLength,
-    // BytesData(usize),
+
+    /// Decode a signed number (integer)
     Number,
+
+    /// State called when all list elements have been decoded
     ListFinished(Value),
-    ListEntry,
+
+    /// State that indicates the returned value belongs to a parent list-value
+    ListElement,
+
+    /// State called when all map entries have been decoded
     MapFinished(Value),
+
+    /// State that indicates the returned value belongs to a parent map-value
     MapEntry(Vec<u8>),
 }
 
+/// In the initial/list_entry/map_entry states this is where we figure out what to decode next
 fn decode_state_initial(decode_context: &mut DecodeContext) -> Result<()> {
     let cmd = decode_context
         .peek_next()
@@ -190,7 +213,7 @@ fn decode_state_initial(decode_context: &mut DecodeContext) -> Result<()> {
         'l' => {
             decode_context.next(); // Throw away dict-opening cmd
             decode_context.push_state(DecodeState::ListFinished(Value::List(vec![])));
-            decode_context.push_state(DecodeState::ListEntry);
+            decode_context.push_state(DecodeState::ListElement);
         }
         'd' => {
             decode_context.next(); // Throw away dict-opening cmd
@@ -208,6 +231,7 @@ fn decode_state_initial(decode_context: &mut DecodeContext) -> Result<()> {
     Ok(())
 }
 
+/// Decoding length prefixed bytes
 fn decode_state_bytes(decode_context: &mut DecodeContext) -> Result<Value> {
     while let Some(d) = decode_context.next() {
         match d as char {
@@ -248,6 +272,7 @@ fn decode_state_bytes(decode_context: &mut DecodeContext) -> Result<Value> {
     bail!("unexpected end of data");
 }
 
+/// Decoding a signed number (integer)
 fn decode_state_number(decode_context: &mut DecodeContext) -> Result<Value> {
     decode_context.next(); // Throw away opening "i"
     while let Some(d) = decode_context.next() {
@@ -274,7 +299,8 @@ fn decode_state_number(decode_context: &mut DecodeContext) -> Result<Value> {
     bail!("unexpected end of data");
 }
 
-fn decode_state_listentry_decoded(decode_context: &mut DecodeContext, val: Value) -> Result<()> {
+/// A list element has been decoded, store it to the parent list value and check if we are done or have more elements to decode
+fn decode_state_list_element_decoded(decode_context: &mut DecodeContext, val: Value) -> Result<()> {
     let mut list_state = decode_context
         .parent_state()
         .unwrap_or_else(|| panic!("should always be possible to get the parent map state"));
@@ -284,12 +310,12 @@ fn decode_state_listentry_decoded(decode_context: &mut DecodeContext, val: Value
         _ => panic!("should always be able to unpack list value"),
     };
 
-    let items = match list_value {
-        Value::List(items) => items,
+    let elements = match list_value {
+        Value::List(elements) => elements,
         _ => panic!("list value must be of type Value::List"),
     };
 
-    items.push(val);
+    elements.push(val);
 
     // Check if there are more entries or a termination cmd
     let cmd = decode_context
@@ -300,13 +326,14 @@ fn decode_state_listentry_decoded(decode_context: &mut DecodeContext, val: Value
         decode_context.next(); // Consume "e"
         decode_context.pop_state();
     } else {
-        // There are more entries, so we stay in current state
+        // There are more elements, so we stay in current state
     }
 
     Ok(())
 }
 
-fn decode_state_mapdata_decoded(
+/// A map entry has been decoded, store it to the parent map value and check if we are done or have more entries to decode
+fn decode_state_map_entry_decoded(
     decode_context: &mut DecodeContext,
     key: &Vec<u8>,
     val: Value,

@@ -1,6 +1,7 @@
 use super::*;
 use anyhow::{bail, Result};
 
+/// Encode a Value (an intermediate format) into a bencoded vector of bytes
 pub fn encode(val: &Value) -> Result<Vec<u8>> {
     match val {
         Value::Bytes(byts) => {
