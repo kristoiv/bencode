@@ -81,6 +81,12 @@ impl<T: Into<Value> + Clone> From<Vec<T>> for Value {
     }
 }
 
+impl From<String> for Value {
+    fn from(value: String) -> Self {
+        Value::Bytes(value.as_bytes().to_vec())
+    }
+}
+
 /*impl From<Vec<u8>> for Value {
     fn from(value: Vec<u8>) -> Self {
         Value::Bytes(value)
@@ -212,6 +218,17 @@ where
                 }
                 Ok(res)
             }
+            _ => Err(anyhow!("decoded value had unexpected type: {:?}", value).into()),
+        }
+    }
+}
+
+impl TryFrom<Value> for String {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Bytes(bytes) => Ok(String::from_utf8(bytes)?),
             _ => Err(anyhow!("decoded value had unexpected type: {:?}", value).into()),
         }
     }
@@ -783,6 +800,14 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_from_string() {
+        assert_eq!(
+            "Some val".to_owned().bencode_encode().unwrap(),
+            "8:Some val".as_bytes().to_vec(),
+        );
+    }
+
+    #[test]
     fn test_decode_bytestr() {
         // Decode bytes
         let val = "8:Some val";
@@ -933,5 +958,13 @@ mod tests {
     #[should_panic]
     fn test_will_fail_to_decode_to_vec_if_multiple_types() {
         Vec::<u8>::from_bencode(&"li100e8:Some vale".as_bytes().to_vec()).unwrap();
+    }
+
+    #[test]
+    fn test_decode_to_string() {
+        assert_eq!(
+            String::from_bencode(&"8:Some val".as_bytes().to_vec()).unwrap(),
+            "Some val".to_owned()
+        );
     }
 }
