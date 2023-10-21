@@ -928,4 +928,10 @@ mod tests {
             vec![1337, -1337]
         );
     }
+
+    #[test]
+    #[should_panic]
+    fn test_will_fail_to_decode_to_vec_if_multiple_types() {
+        Vec::<u8>::from_bencode(&"li100e8:Some vale".as_bytes().to_vec()).unwrap();
+    }
 }
