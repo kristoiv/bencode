@@ -17,7 +17,7 @@ pub fn decode(data: &Vec<u8>) -> Result<Value> {
                         decode_state_list_element_decoded(&mut decode_context, val)
                             .context("decode_state_list_element_decoded")?
                     }
-                    // MapFinished in these context means entry-key found, move on to entry
+                    // MapFinished in this context means entry-key found, move on to entry
                     DecodeState::MapFinished(..) => {
                         let key = match val {
                             Value::Bytes(key) => key,
