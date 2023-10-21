@@ -8,6 +8,161 @@ pub enum Value {
     Map(Vec<(Vec<u8>, Value)>),
 }
 
+pub trait BencodeEncode {
+    fn bencode_encode(&self) -> Result<Vec<u8>>;
+}
+
+impl BencodeEncode for Vec<u8> {
+    fn bencode_encode(&self) -> Result<Vec<u8>> {
+        encode(&Value::Bytes(self.clone()))
+    }
+}
+
+impl BencodeEncode for u8 {
+    fn bencode_encode(&self) -> Result<Vec<u8>> {
+        encode(&Value::Number(*self as i64))
+    }
+}
+
+impl BencodeEncode for u16 {
+    fn bencode_encode(&self) -> Result<Vec<u8>> {
+        encode(&Value::Number(*self as i64))
+    }
+}
+
+impl BencodeEncode for u32 {
+    fn bencode_encode(&self) -> Result<Vec<u8>> {
+        encode(&Value::Number(*self as i64))
+    }
+}
+
+impl BencodeEncode for u64 {
+    fn bencode_encode(&self) -> Result<Vec<u8>> {
+        encode(&Value::Number(*self as i64))
+    }
+}
+
+impl BencodeEncode for i8 {
+    fn bencode_encode(&self) -> Result<Vec<u8>> {
+        encode(&Value::Number(*self as i64))
+    }
+}
+
+impl BencodeEncode for i16 {
+    fn bencode_encode(&self) -> Result<Vec<u8>> {
+        encode(&Value::Number(*self as i64))
+    }
+}
+
+impl BencodeEncode for i32 {
+    fn bencode_encode(&self) -> Result<Vec<u8>> {
+        encode(&Value::Number(*self as i64))
+    }
+}
+
+impl BencodeEncode for i64 {
+    fn bencode_encode(&self) -> Result<Vec<u8>> {
+        encode(&Value::Number(*self as i64))
+    }
+}
+
+pub trait BencodeDecode
+where
+    Self: Sized,
+{
+    fn from_bencode(val: &Vec<u8>) -> Result<Self>;
+}
+
+impl BencodeDecode for Vec<u8> {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Bytes(bytes) => Ok(bytes),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}
+
+impl BencodeDecode for u8 {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Number(num) => Ok(num as Self),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}
+
+impl BencodeDecode for u16 {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Number(num) => Ok(num as Self),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}
+
+impl BencodeDecode for u32 {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Number(num) => Ok(num as Self),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}
+
+impl BencodeDecode for u64 {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Number(num) => Ok(num as Self),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}
+
+impl BencodeDecode for i8 {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Number(num) => Ok(num as Self),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}
+
+impl BencodeDecode for i16 {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Number(num) => Ok(num as Self),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}
+
+impl BencodeDecode for i32 {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Number(num) => Ok(num as Self),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}
+
+impl BencodeDecode for i64 {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Number(num) => Ok(num as Self),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}
+
 pub fn encode(val: &Value) -> Result<Vec<u8>> {
     match val {
         Value::Bytes(byts) => {
@@ -498,6 +653,35 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_primitive_types() {
+        let vu8: u8 = 8;
+        let vu16: u16 = 16;
+        let vu32: u32 = 32;
+        let vu64: u64 = 64;
+
+        assert_eq!(vu8.bencode_encode().unwrap(), "i8e".as_bytes().to_vec());
+        assert_eq!(vu16.bencode_encode().unwrap(), "i16e".as_bytes().to_vec());
+        assert_eq!(vu32.bencode_encode().unwrap(), "i32e".as_bytes().to_vec());
+        assert_eq!(vu64.bencode_encode().unwrap(), "i64e".as_bytes().to_vec());
+
+        let vi8: i8 = -8;
+        let vi16: i16 = -16;
+        let vi32: i32 = -32;
+        let vi64: i64 = -64;
+
+        assert_eq!(vi8.bencode_encode().unwrap(), "i-8e".as_bytes().to_vec());
+        assert_eq!(vi16.bencode_encode().unwrap(), "i-16e".as_bytes().to_vec());
+        assert_eq!(vi32.bencode_encode().unwrap(), "i-32e".as_bytes().to_vec());
+        assert_eq!(vi64.bencode_encode().unwrap(), "i-64e".as_bytes().to_vec());
+
+        let string = "some string value".to_owned().as_bytes().to_vec();
+        assert_eq!(
+            string.bencode_encode().unwrap(),
+            "17:some string value".as_bytes().to_vec()
+        );
+    }
+
+    #[test]
     fn test_decode_bytestr() {
         // Decode bytes
         let val = "8:Some val";
@@ -577,5 +761,34 @@ mod tests {
                 )])
             );
         }
+    }
+
+    #[test]
+    fn test_decode_primitive_types() {
+        let vu8: Vec<u8> = "i8e".as_bytes().to_vec();
+        let vu16: Vec<u8> = "i16e".as_bytes().to_vec();
+        let vu32: Vec<u8> = "i32e".as_bytes().to_vec();
+        let vu64: Vec<u8> = "i64e".as_bytes().to_vec();
+
+        assert_eq!(u8::from_bencode(&vu8).unwrap(), 8);
+        assert_eq!(u16::from_bencode(&vu16).unwrap(), 16);
+        assert_eq!(u32::from_bencode(&vu32).unwrap(), 32);
+        assert_eq!(u64::from_bencode(&vu64).unwrap(), 64);
+
+        let vi8: Vec<u8> = "i-8e".as_bytes().to_vec();
+        let vi16: Vec<u8> = "i-16e".as_bytes().to_vec();
+        let vi32: Vec<u8> = "i-32e".as_bytes().to_vec();
+        let vi64: Vec<u8> = "i-64e".as_bytes().to_vec();
+
+        assert_eq!(i8::from_bencode(&vi8).unwrap(), -8);
+        assert_eq!(i16::from_bencode(&vi16).unwrap(), -16);
+        assert_eq!(i32::from_bencode(&vi32).unwrap(), -32);
+        assert_eq!(i64::from_bencode(&vi64).unwrap(), -64);
+
+        let string = "17:some string value".as_bytes().to_vec();
+        assert_eq!(
+            Vec::<u8>::from_bencode(&string).unwrap(),
+            "some string value".to_owned().as_bytes().to_vec(),
+        );
     }
 }
