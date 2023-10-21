@@ -12,68 +12,270 @@ pub trait BencodeEncode {
     fn bencode_encode(&self) -> Result<Vec<u8>>;
 }
 
-impl BencodeEncode for Vec<u8> {
+impl<T> BencodeEncode for T
+where
+    T: Into<Value> + Clone,
+{
     fn bencode_encode(&self) -> Result<Vec<u8>> {
-        encode(&Value::Bytes(self.clone()))
+        let val: Value = self.clone().into();
+        encode(&val)
     }
 }
 
-impl BencodeEncode for u8 {
-    fn bencode_encode(&self) -> Result<Vec<u8>> {
-        encode(&Value::Number(*self as i64))
+impl From<u8> for Value {
+    fn from(value: u8) -> Self {
+        Value::Number(value as i64)
     }
 }
 
-impl BencodeEncode for u16 {
-    fn bencode_encode(&self) -> Result<Vec<u8>> {
-        encode(&Value::Number(*self as i64))
+impl From<u16> for Value {
+    fn from(value: u16) -> Self {
+        Value::Number(value as i64)
     }
 }
 
-impl BencodeEncode for u32 {
-    fn bencode_encode(&self) -> Result<Vec<u8>> {
-        encode(&Value::Number(*self as i64))
+impl From<u32> for Value {
+    fn from(value: u32) -> Self {
+        Value::Number(value as i64)
     }
 }
 
-impl BencodeEncode for u64 {
-    fn bencode_encode(&self) -> Result<Vec<u8>> {
-        encode(&Value::Number(*self as i64))
+impl From<u64> for Value {
+    fn from(value: u64) -> Self {
+        Value::Number(value as i64)
     }
 }
 
-impl BencodeEncode for i8 {
-    fn bencode_encode(&self) -> Result<Vec<u8>> {
-        encode(&Value::Number(*self as i64))
+impl From<i8> for Value {
+    fn from(value: i8) -> Self {
+        Value::Number(value as i64)
     }
 }
 
-impl BencodeEncode for i16 {
-    fn bencode_encode(&self) -> Result<Vec<u8>> {
-        encode(&Value::Number(*self as i64))
+impl From<i16> for Value {
+    fn from(value: i16) -> Self {
+        Value::Number(value as i64)
     }
 }
 
-impl BencodeEncode for i32 {
-    fn bencode_encode(&self) -> Result<Vec<u8>> {
-        encode(&Value::Number(*self as i64))
+impl From<i32> for Value {
+    fn from(value: i32) -> Self {
+        Value::Number(value as i64)
     }
 }
 
-impl BencodeEncode for i64 {
-    fn bencode_encode(&self) -> Result<Vec<u8>> {
-        encode(&Value::Number(*self as i64))
+impl From<i64> for Value {
+    fn from(value: i64) -> Self {
+        Value::Number(value as i64)
     }
 }
 
-pub trait BencodeDecode
+impl From<Vec<u8>> for Value {
+    fn from(value: Vec<u8>) -> Self {
+        Value::Bytes(value)
+    }
+}
+
+pub trait BencodeDecode<T>
 where
     Self: Sized,
+    T: TryFrom<Value>,
 {
     fn from_bencode(val: &Vec<u8>) -> Result<Self>;
 }
 
-impl BencodeDecode for Vec<u8> {
+impl<T> BencodeDecode<T> for T
+where
+    T: TryFrom<Value>,
+    anyhow::Error: From<T::Error>,
+{
+    fn from_bencode(bytes: &Vec<u8>) -> Result<T> {
+        let val = decode(bytes)?;
+        let res: T = val.try_into()?;
+        Ok(res)
+    }
+}
+
+impl TryFrom<Value> for u8 {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(num) => Ok(num as Self),
+            _ => Err(anyhow!("decoded value had unexpected type: {:?}", value).into()),
+        }
+    }
+}
+
+impl TryFrom<Value> for u16 {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(num) => Ok(num as Self),
+            _ => Err(anyhow!("decoded value had unexpected type: {:?}", value).into()),
+        }
+    }
+}
+
+impl TryFrom<Value> for u32 {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(num) => Ok(num as Self),
+            _ => Err(anyhow!("decoded value had unexpected type: {:?}", value).into()),
+        }
+    }
+}
+
+impl TryFrom<Value> for u64 {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(num) => Ok(num as Self),
+            _ => Err(anyhow!("decoded value had unexpected type: {:?}", value).into()),
+        }
+    }
+}
+
+impl TryFrom<Value> for i8 {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(num) => Ok(num as Self),
+            _ => Err(anyhow!("decoded value had unexpected type: {:?}", value).into()),
+        }
+    }
+}
+
+impl TryFrom<Value> for i16 {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(num) => Ok(num as Self),
+            _ => Err(anyhow!("decoded value had unexpected type: {:?}", value).into()),
+        }
+    }
+}
+
+impl TryFrom<Value> for i32 {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(num) => Ok(num as Self),
+            _ => Err(anyhow!("decoded value had unexpected type: {:?}", value).into()),
+        }
+    }
+}
+
+impl TryFrom<Value> for i64 {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(num) => Ok(num as Self),
+            _ => Err(anyhow!("decoded value had unexpected type: {:?}", value).into()),
+        }
+    }
+}
+
+impl TryFrom<Value> for Vec<u8> {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Bytes(data) => Ok(data),
+            _ => Err(anyhow!("decoded value had unexpected type: {:?}", value).into()),
+        }
+    }
+}
+
+/*impl<T> BencodeDecode<T> for u8 {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Number(num) => Ok(num as Self),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}
+
+impl<T> BencodeDecode<T> for u16 {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Number(num) => Ok(num as Self),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}
+
+impl<T> BencodeDecode<T> for u32 {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Number(num) => Ok(num as Self),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}
+
+impl<T> BencodeDecode<T> for u64 {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Number(num) => Ok(num as Self),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}
+
+/*impl<T> BencodeDecode<T> for i8 {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Number(num) => Ok(num as Self),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}*/
+
+impl<T> BencodeDecode<T> for i16 {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Number(num) => Ok(num as Self),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}
+
+impl<T> BencodeDecode<T> for i32 {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Number(num) => Ok(num as Self),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}
+
+impl<T> BencodeDecode<T> for i64 {
+    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
+        let val = decode(bytes)?;
+        match val {
+            Value::Number(num) => Ok(num as Self),
+            _ => bail!("decoded value had unexpected type: {:?}", val),
+        }
+    }
+}
+
+impl<T> BencodeDecode<T> for Vec<u8> {
     fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
         let val = decode(bytes)?;
         match val {
@@ -81,87 +283,7 @@ impl BencodeDecode for Vec<u8> {
             _ => bail!("decoded value had unexpected type: {:?}", val),
         }
     }
-}
-
-impl BencodeDecode for u8 {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Number(num) => Ok(num as Self),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
-        }
-    }
-}
-
-impl BencodeDecode for u16 {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Number(num) => Ok(num as Self),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
-        }
-    }
-}
-
-impl BencodeDecode for u32 {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Number(num) => Ok(num as Self),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
-        }
-    }
-}
-
-impl BencodeDecode for u64 {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Number(num) => Ok(num as Self),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
-        }
-    }
-}
-
-impl BencodeDecode for i8 {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Number(num) => Ok(num as Self),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
-        }
-    }
-}
-
-impl BencodeDecode for i16 {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Number(num) => Ok(num as Self),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
-        }
-    }
-}
-
-impl BencodeDecode for i32 {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Number(num) => Ok(num as Self),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
-        }
-    }
-}
-
-impl BencodeDecode for i64 {
-    fn from_bencode(bytes: &Vec<u8>) -> Result<Self> {
-        let val = decode(bytes)?;
-        match val {
-            Value::Number(num) => Ok(num as Self),
-            _ => bail!("decoded value had unexpected type: {:?}", val),
-        }
-    }
-}
+}*/
 
 pub fn encode(val: &Value) -> Result<Vec<u8>> {
     match val {
