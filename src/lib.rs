@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{anyhow, bail, Context, Result};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -87,11 +89,20 @@ impl From<String> for Value {
     }
 }
 
-/*impl From<Vec<u8>> for Value {
-    fn from(value: Vec<u8>) -> Self {
-        Value::Bytes(value)
+impl<T> From<HashMap<String, T>> for Value
+where
+    T: Into<Value>,
+{
+    fn from(value: HashMap<String, T>) -> Self {
+        let mut entries = vec![];
+        for (key, val) in value {
+            let key = key.as_bytes().to_vec();
+            let val: Value = val.into();
+            entries.push((key, val));
+        }
+        Value::Map(entries)
     }
-}*/
+}
 
 pub trait BencodeDecode<T>
 where
@@ -234,16 +245,28 @@ impl TryFrom<Value> for String {
     }
 }
 
-/*impl TryFrom<Value> for Vec<u8> {
+impl<T> TryFrom<Value> for HashMap<String, T>
+where
+    T: TryFrom<Value>,
+    anyhow::Error: From<T::Error>,
+{
     type Error = anyhow::Error;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
-            Value::Bytes(data) => Ok(data),
+            Value::Map(entries) => {
+                let mut res = HashMap::new();
+                for (key, val) in entries {
+                    let key = String::from_utf8(key)?;
+                    let val: T = val.try_into()?;
+                    res.insert(key, val);
+                }
+                Ok(res)
+            }
             _ => Err(anyhow!("decoded value had unexpected type: {:?}", value).into()),
         }
     }
-}*/
+}
 
 pub fn encode(val: &Value) -> Result<Vec<u8>> {
     match val {
@@ -808,6 +831,20 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_from_hashmap() {
+        let mut expected_inner = HashMap::new();
+        expected_inner.insert("Some inner".to_owned(), 1337_u32);
+
+        let mut expected_outer = HashMap::new();
+        expected_outer.insert("Some outer".to_owned(), expected_inner);
+
+        assert_eq!(
+            expected_outer.bencode_encode().unwrap(),
+            "d10:Some outerd10:Some inneri1337eee".as_bytes().to_vec(),
+        );
+    }
+
+    #[test]
     fn test_decode_bytestr() {
         // Decode bytes
         let val = "8:Some val";
@@ -965,6 +1002,21 @@ mod tests {
         assert_eq!(
             String::from_bencode(&"8:Some val".as_bytes().to_vec()).unwrap(),
             "Some val".to_owned()
+        );
+    }
+
+    #[test]
+    fn test_decode_to_hashmap() {
+        let mut expected_inner = HashMap::new();
+        expected_inner.insert("Some inner".to_owned(), 1337_u32);
+
+        let mut expected_outer = HashMap::new();
+        expected_outer.insert("Some outer".to_owned(), expected_inner);
+
+        assert_eq!(
+            HashMap::from_bencode(&"d10:Some outerd10:Some inneri1337eee".as_bytes().to_vec())
+                .unwrap(),
+            expected_outer,
         );
     }
 }
