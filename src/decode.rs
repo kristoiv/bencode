@@ -409,50 +409,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn decode_bytes() {
-        assert_eq!(
-            decode(&b"8:Some val".to_vec()).unwrap(),
-            Value::Bytes(b"Some val".to_vec())
-        );
-    }
-
-    #[test]
-    fn decode_list() {
-        assert_eq!(
-            decode(&b"l8:Some val8:Some vale".to_vec()).unwrap(),
-            Value::List(vec![
-                Value::Bytes(b"Some val".to_vec()),
-                Value::Bytes(b"Some val".to_vec()),
-            ]),
-        );
-    }
-
-    #[test]
-    fn decode_dict() {
-        assert_eq!(
-            decode(&b"d8:Some val8:Some vale".to_vec()).unwrap(),
-            Value::Map(vec![(
-                b"Some val".to_vec(),
-                Value::Bytes(b"Some val".to_vec())
-            )]),
-        );
-    }
-
-    #[test]
-    fn decode_multi_level() {
-        assert_eq!(
-            decode(&b"d3:fool8:Some val8:Some valee".to_vec()).unwrap(),
-            Value::Map(vec![(
-                b"foo".to_vec(),
-                Value::List(vec![
-                    Value::Bytes(b"Some val".to_vec()),
-                    Value::Bytes(b"Some val".to_vec()),
-                ])
-            )]),
-        );
-    }
-
-    #[test]
     fn test_decode_bytestr() {
         // Decode bytes
         let val = "8:Some val";
