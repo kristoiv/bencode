@@ -1,5 +1,5 @@
 use super::*;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 
 /// Decode a bencoded vector of bytes into a Value (an intermediate format)
 pub fn decode(data: &Vec<u8>) -> Result<Value> {
@@ -171,7 +171,7 @@ impl DSHandlers for DS {
     fn decode_next(&self, ctx: &mut Ctx) -> Result<AfterDecodeNext> {
         let cmd = ctx
             .peek()
-            .ok_or_else(|| anyhow!("unexpected end of input"))? as char;
+            .context("unexpected end of data while decoding")? as char;
 
         match cmd {
             '0'..='9' => Ok(AfterDecodeNext::Bytes),
@@ -183,12 +183,12 @@ impl DSHandlers for DS {
                 Parent::Dict { .. } => Ok(AfterDecodeNext::DictEnd),
                 Parent::None => todo!(),
             },
-            _ => Err(anyhow!(
+            _ => bail!(
                 "unexpected cmd: {} ({:#0X}, offset={})",
                 cmd,
                 cmd as u8,
                 ctx.offset(),
-            )),
+            ),
         }
     }
 
