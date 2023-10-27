@@ -3,390 +3,454 @@ use anyhow::{anyhow, bail, Context, Result};
 
 /// Decode a bencoded vector of bytes into a Value (an intermediate format)
 pub fn decode(data: &Vec<u8>) -> Result<Value> {
-    let mut decode_context = DecodeContext::new(data);
-    loop {
-        match decode_context.state() {
-            DecodeState::Initial | DecodeState::ListElement | DecodeState::MapEntry(..) => {
-                decode_state_initial(&mut decode_context).context("decode_state_initial")?
-            }
-            DecodeState::Bytes => {
-                let val = decode_state_bytes(&mut decode_context).context("decode_state_bytes")?;
-                match decode_context.state() {
-                    DecodeState::Initial => return Ok(val),
-                    DecodeState::ListElement => {
-                        decode_state_list_element_decoded(&mut decode_context, val)
-                            .context("decode_state_list_element_decoded")?
-                    }
-                    // MapFinished in this context means entry-key found, move on to entry
-                    DecodeState::MapFinished(..) => {
-                        let key = match val {
-                            Value::Bytes(key) => key,
-                            _ => panic!("value must be of type Value::Bytes, was: {:?}", val),
-                        };
-                        decode_context.push_state(DecodeState::MapEntry(key));
-                    }
-                    DecodeState::MapEntry(key) => {
-                        let key = key.clone();
-                        decode_state_map_entry_decoded(&mut decode_context, &key, val)
-                            .context("decode_state_map_entry_decoded")?
-                    }
-                    _ => {
-                        panic!(
-                            "unexpected state after reading bytes: {:?}",
-                            decode_context.state()
-                        )
-                    }
-                }
-            }
-            DecodeState::Number => {
-                let val =
-                    decode_state_number(&mut decode_context).context("decode_state_number")?;
-                match decode_context.state() {
-                    DecodeState::Initial => return Ok(val),
-                    DecodeState::ListElement => {
-                        decode_state_list_element_decoded(&mut decode_context, val)
-                            .context("decode_state_list_element_decoded")?
-                    }
-                    DecodeState::MapEntry(key) => {
-                        let key = key.clone();
-                        decode_state_map_entry_decoded(&mut decode_context, &key, val)
-                            .context("decode_state_map_entry_decoded")?
-                    }
-                    _ => {
-                        panic!(
-                            "unexpected state after reading number: {:?}",
-                            decode_context.state(),
-                        )
-                    }
-                }
-            }
-            DecodeState::ListFinished(val) => {
-                let val = val.clone();
-                decode_context.pop_state();
-                match decode_context.state() {
-                    DecodeState::Initial => return Ok(val.clone()),
-                    DecodeState::ListElement => {
-                        decode_state_list_element_decoded(&mut decode_context, val)
-                            .context("decode_state_list_element_decoded")?
-                    }
-                    DecodeState::MapEntry(key) => {
-                        let key = key.clone();
-                        decode_state_map_entry_decoded(&mut decode_context, &key, val)
-                            .context("decode_state_map_entry_decoded")?
-                    }
-                    _ => {
-                        panic!(
-                            "unexpected state after reading list: {:?}",
-                            decode_context.state(),
-                        )
-                    }
-                }
-            }
-            DecodeState::MapFinished(val) => {
-                let val = val.clone();
-                decode_context.pop_state();
-                match decode_context.state() {
-                    DecodeState::Initial => return Ok(val.clone()),
-                    DecodeState::ListElement => {
-                        decode_state_list_element_decoded(&mut decode_context, val)
-                            .context("decode_state_list_element_decoded")?
-                    }
-                    DecodeState::MapEntry(key) => {
-                        let key = key.clone();
-                        decode_state_map_entry_decoded(&mut decode_context, &key, val)
-                            .context("decode_state_map_entry_decoded")?
-                    }
-                    _ => {
-                        panic!(
-                            "unexpected state after reading map: {:?}",
-                            decode_context.state(),
-                        )
-                    }
-                }
-            }
-        }
-    }
+    let mut ctx = Ctx::new(data);
+    let mut ds = DS::default();
+    ds.run(&mut ctx)
 }
 
-/// The decode context holds all the required state for the state machine to operate
-struct DecodeContext<'a> {
-    state_vec: Vec<DecodeState>,
-    state_buffer: Vec<u8>,
+/// Decoding context to keep track of data, cursor and parent values
+struct Ctx<'a> {
     data: &'a Vec<u8>,
     idx: usize,
+    parent_stack: Vec<Parent>,
 }
 
-impl<'a> DecodeContext<'a> {
-    /// Create the initial decode context
+impl<'a> Ctx<'a> {
+    /// Create new decoding context with a given data buffer
     fn new(data: &'a Vec<u8>) -> Self {
-        DecodeContext {
-            state_buffer: vec![],
-            state_vec: vec![DecodeState::Initial],
+        Self {
             data,
             idx: 0,
+            parent_stack: vec![Parent::None],
         }
     }
 
-    /// Get the current state of decoding
-    fn state(&mut self) -> &mut DecodeState {
-        self.state_vec
-            .last_mut()
-            .expect("there should always be a valid state set")
+    /// Peek at next byte to be decoded
+    fn peek(&self) -> Option<u8> {
+        self.data.get(self.idx).copied()
     }
 
-    /// Get the parent decoding state of the current state, if it exists
-    fn parent_state(&mut self) -> Option<&mut DecodeState> {
-        let len = self.state_vec.len();
-        if len < 2 {
-            None
-        } else {
-            self.state_vec.get_mut(len - 2)
-        }
-    }
-
-    /// Push a new decoding state, making it the current one
-    fn push_state(&mut self, ds: DecodeState) {
-        self.state_vec.push(ds);
-    }
-
-    /// Pop off the current decoding state
-    fn pop_state(&mut self) -> DecodeState {
-        self.state_vec
-            .pop()
-            .expect("there should always be a valid state set")
-    }
-
-    /// Peek at the next byte that will be decoded (if it exists), without moving the cursor
-    fn peek_next(&self) -> Option<u8> {
-        self.data.get(self.idx).map(|it| *it)
-    }
-
-    /// Retrieve the next byte to decode (if it exists)
+    /// Get next byte to be decoded and advance cursor
     fn next(&mut self) -> Option<u8> {
-        let next = self.peek_next()?;
+        let n = self.peek()?;
         self.idx += 1;
-        Some(next)
+        Some(n)
     }
 
-    /// Retrieve the current offset of the cursor into the data we are decoding
-    fn offset(&self) -> usize {
-        self.idx
+    /// Get a reference to the current Parent value
+    fn parent(&mut self) -> &mut Parent {
+        self.parent_stack
+            .last_mut()
+            .expect("there should always be a parent")
+    }
+
+    /// Push a new current Parent value
+    fn push_parent(&mut self, p: Parent) {
+        self.parent_stack.push(p);
+    }
+
+    /// Pop out the current Parent value
+    fn pop_parent(&mut self) -> Parent {
+        self.parent_stack
+            .pop()
+            .expect("there should always be a parent")
     }
 }
 
-/// The decode states are the different states of the state machine used for decoding
-#[derive(Debug, Clone)]
-enum DecodeState {
-    /// The initial state: indicates where to start, and when we should return the final value
-    Initial,
+/// Parent value types
+enum Parent {
+    /// Parent is a list type
+    List { container: Value },
 
-    /// Decode a length prefixed number of bytes
+    /// Parent is a dictionary type
+    Dict {
+        container: Value,
+        next_key: Option<Value>,
+    },
+
+    /// There is no parent
+    None,
+}
+
+/// Decoder states of the finite state machine
+enum DS {
+    /// Discover next value type
+    DecodeNext,
+
+    /// Decode a length prefixed byte array
     Bytes,
 
-    /// Decode a signed number (integer)
+    /// Decode a number
     Number,
 
-    /// State called when all list elements have been decoded
-    ListFinished(Value),
+    /// Decode a list of values
+    ListStart,
 
-    /// State that indicates the returned value belongs to a parent list-value
-    ListElement,
+    /// Decoding of a list of values completed
+    ListEnd,
 
-    /// State called when all map entries have been decoded
-    MapFinished(Value),
+    /// Decode a dict of values
+    DictStart,
 
-    /// State that indicates the returned value belongs to a parent map-value
-    MapEntry(Vec<u8>),
+    /// Decoding of a dict of values completed
+    DictEnd,
+
+    /// Value found, finished!
+    Finished(Value),
 }
 
-/// In the initial/list_entry/map_entry states this is where we figure out what to decode next
-fn decode_state_initial(decode_context: &mut DecodeContext) -> Result<()> {
-    let cmd = decode_context
-        .peek_next()
-        .ok_or(anyhow!("unexpected end of data"))? as char;
+impl Default for DS {
+    /// Create a default decoder state
+    fn default() -> Self {
+        Self::DecodeNext
+    }
+}
 
-    match cmd {
-        '0'..='9' => decode_context.push_state(DecodeState::Bytes),
-        'i' => {
-            decode_context.push_state(DecodeState::Number);
+/// Possible state transitions for the "DecodeNext" state
+enum AfterDecodeNext {
+    Bytes,
+    Number,
+    ListStart,
+    ListEnd,
+    DictStart,
+    DictEnd,
+}
+
+/// Possible state transitions for the "Bytes" state
+enum AfterBytes {
+    DecodeNext,
+    Finished(Value),
+}
+
+/// Possible state transitions for the "Number" state
+enum AfterNumber {
+    DecodeNext,
+    Finished(Value),
+}
+
+/// Possible state transitions for the "ListStart" state
+enum AfterListStart {
+    DecodeNext,
+}
+
+/// Possible state transitions for the "ListEnd" state
+enum AfterListEnd {
+    DecodeNext,
+    Finished(Value),
+}
+
+/// Possible state transitions for the "DictStart" state
+enum AfterDictStart {
+    Bytes,
+}
+
+/// Possible state transitions for the "DictEnd" state
+enum AfterDictEnd {
+    DecodeNext,
+    Finished(Value),
+}
+
+/// Decoder state handlers that must be implemented
+trait DSHandlers {
+    fn decode_next(&self, ctx: &mut Ctx) -> Result<AfterDecodeNext>;
+    fn bytes(&self, ctx: &mut Ctx) -> Result<AfterBytes>;
+    fn number(&self, ctx: &mut Ctx) -> Result<AfterNumber>;
+    fn list_start(&self, ctx: &mut Ctx) -> Result<AfterListStart>;
+    fn list_end(&self, ctx: &mut Ctx) -> Result<AfterListEnd>;
+    fn dict_start(&self, ctx: &mut Ctx) -> Result<AfterDictStart>;
+    fn dict_end(&self, ctx: &mut Ctx) -> Result<AfterDictEnd>;
+}
+
+impl DSHandlers for DS {
+    /// Decode next state
+    fn decode_next(&self, ctx: &mut Ctx) -> Result<AfterDecodeNext> {
+        let cmd = ctx
+            .peek()
+            .ok_or_else(|| anyhow!("unexpected end of input"))? as char;
+
+        match cmd {
+            '0'..='9' => Ok(AfterDecodeNext::Bytes),
+            'i' => Ok(AfterDecodeNext::Number),
+            'l' => Ok(AfterDecodeNext::ListStart),
+            'd' => Ok(AfterDecodeNext::DictStart),
+            'e' => match ctx.parent() {
+                Parent::List { .. } => Ok(AfterDecodeNext::ListEnd),
+                Parent::Dict { .. } => Ok(AfterDecodeNext::DictEnd),
+                Parent::None => todo!(),
+            },
+            _ => Err(anyhow!("unexpected cmd {} ({:#0X})", cmd, cmd as u8)),
         }
-        'l' => {
-            decode_context.next(); // Throw away dict-opening cmd
-            decode_context.push_state(DecodeState::ListFinished(Value::List(vec![])));
-            decode_context.push_state(DecodeState::ListElement);
-        }
-        'd' => {
-            decode_context.next(); // Throw away dict-opening cmd
-            decode_context.push_state(DecodeState::MapFinished(Value::Map(vec![])));
-            decode_context.push_state(DecodeState::Bytes);
-        }
-        _ => bail!(
-            "invalid format at [{}]: {} ({:#0X})",
-            decode_context.offset() + 1,
-            cmd,
-            cmd as u8,
-        ),
     }
 
-    Ok(())
-}
+    /// Bytes state
+    fn bytes(&self, ctx: &mut Ctx) -> Result<AfterBytes> {
+        let mut buf = vec![];
 
-/// Decoding length prefixed bytes
-fn decode_state_bytes(decode_context: &mut DecodeContext) -> Result<Value> {
-    while let Some(d) = decode_context.next() {
-        match d as char {
-            '0'..='9' => decode_context.state_buffer.push(d),
-            ':' => {
-                let mut len = String::from_utf8(decode_context.state_buffer.clone())
-                    .context("decoding bytes length prefix")?
-                    .parse::<usize>()
-                    .context("parsing bytes length prefix to usize")?;
-
-                if len == 0 {
-                    bail!("bytes was unexpectedly zero length");
-                }
-
-                decode_context.state_buffer.clear();
-
-                while let Some(d) = decode_context.next() {
-                    decode_context.state_buffer.push(d);
-                    len -= 1;
-                    if len == 0 {
-                        let val = Value::Bytes(decode_context.state_buffer.clone());
-                        decode_context.state_buffer.clear();
-                        decode_context.pop_state();
-                        return Ok(val);
-                    }
-                }
-
-                bail!("unexpected end of data");
+        while let Some(n) = ctx.next() {
+            match n as char {
+                '0'..='9' => buf.push(n),
+                ':' => break,
+                _ => bail!("unexpected input"),
             }
-            _ => bail!(
-                "invalid format at [{}]: {} ({:#0X})",
-                decode_context.offset(),
-                d as char,
-                d,
-            ),
         }
-    }
-    bail!("unexpected end of data");
-}
 
-/// Decoding a signed number (integer)
-fn decode_state_number(decode_context: &mut DecodeContext) -> Result<Value> {
-    decode_context.next(); // Throw away opening "i"
-    while let Some(d) = decode_context.next() {
-        match d as char {
-            '-' | '0'..='9' => decode_context.state_buffer.push(d),
-            'e' => {
-                let num = String::from_utf8(decode_context.state_buffer.clone())
-                    .context("decoding number as string")?
-                    .parse::<i64>()
-                    .context("parsing number as i64")?;
+        let mut len = String::from_utf8(buf)
+            .context("decode bytes length prefix as utf-8 string")?
+            .parse::<usize>()
+            .context("parsing decoded bytes length prefix as usize")?;
 
-                decode_context.state_buffer.clear();
-                decode_context.pop_state();
-                return Ok(Value::Number(num));
-            }
-            _ => bail!(
-                "invalid format at [{}]: {} ({:#0X})",
-                decode_context.offset(),
-                d as char,
-                d,
-            ),
-        }
-    }
-    bail!("unexpected end of data");
-}
-
-/// A list element has been decoded, store it to the parent list value and check if we are done or have more elements to decode
-fn decode_state_list_element_decoded(decode_context: &mut DecodeContext, val: Value) -> Result<()> {
-    let mut list_state = decode_context
-        .parent_state()
-        .unwrap_or_else(|| panic!("should always be possible to get the parent map state"));
-
-    let list_value = match &mut list_state {
-        &mut DecodeState::ListFinished(val) => val,
-        _ => panic!("should always be able to unpack list value"),
-    };
-
-    let elements = match list_value {
-        Value::List(elements) => elements,
-        _ => panic!("list value must be of type Value::List"),
-    };
-
-    elements.push(val);
-
-    // Check if there are more entries or a termination cmd
-    let cmd = decode_context
-        .peek_next()
-        .context("unexpected end of data")? as char;
-
-    if cmd == 'e' {
-        decode_context.next(); // Consume "e"
-        decode_context.pop_state();
-    } else {
-        // There are more elements, so we stay in current state
-    }
-
-    Ok(())
-}
-
-/// A map entry has been decoded, store it to the parent map value and check if we are done or have more entries to decode
-fn decode_state_map_entry_decoded(
-    decode_context: &mut DecodeContext,
-    key: &Vec<u8>,
-    val: Value,
-) -> Result<()> {
-    let mut map_state = decode_context
-        .parent_state()
-        .unwrap_or_else(|| panic!("should always be possible to get the parent map state"));
-
-    let map_value = match &mut map_state {
-        &mut DecodeState::MapFinished(val) => val,
-        _ => panic!("should always be able to unpack map value"),
-    };
-
-    let entries = match map_value {
-        Value::Map(entries) => entries,
-        _ => panic!("map value must be of type Value::Map"),
-    };
-
-    // Maps must be sorted and keys unique
-    if let Some((last_entry_key, _)) = entries.last() {
-        if last_entry_key.eq(key) {
-            bail!("duplicate key entries are not allowed: {:?}", key);
-        }
-        if last_entry_key.gt(key) {
-            bail!(
-                "map keys have to be sorted to be valid: previous_key={:?} > key={:?}",
-                last_entry_key,
-                key,
+        let mut buf = vec![];
+        while len > 0 {
+            buf.push(
+                ctx.next()
+                    .context("unexpected end of data while reading bytes data")?,
             );
+            len -= 1;
+        }
+
+        let val = Value::Bytes(buf);
+
+        match ctx.parent() {
+            Parent::List { container } => {
+                list_entry_handler(container, val);
+                Ok(AfterBytes::DecodeNext)
+            }
+            Parent::Dict {
+                container,
+                next_key,
+            } => {
+                map_entry_handler(container, next_key, val);
+                Ok(AfterBytes::DecodeNext)
+            }
+            Parent::None => Ok(AfterBytes::Finished(val)),
         }
     }
 
-    entries.push((key.clone(), val));
+    /// Number state
+    fn number(&self, ctx: &mut Ctx) -> Result<AfterNumber> {
+        ctx.next(); // discard 'i'
 
-    // Check if there are more entries or a termination cmd
-    let cmd = decode_context
-        .peek_next()
-        .context("unexpected end of data")? as char;
+        let mut buf = vec![];
+        while let Some(n) = ctx.next() {
+            match n as char {
+                '-' | '0'..='9' => buf.push(n),
+                'e' => break,
+                _ => bail!("unexpected input"),
+            }
+        }
 
-    if cmd == 'e' {
-        decode_context.next(); // Consume "e"
-        decode_context.pop_state();
-    } else {
-        // There are more entries
-        decode_context.push_state(DecodeState::Bytes);
+        let num = String::from_utf8(buf)
+            .context("decoding number into utf-8 encoded string")?
+            .parse::<i64>()
+            .context("parsing decoded number as i64")?;
+
+        let val = Value::Number(num);
+
+        match ctx.parent() {
+            Parent::List { container } => {
+                list_entry_handler(container, val);
+                Ok(AfterNumber::DecodeNext)
+            }
+            Parent::Dict {
+                container,
+                next_key,
+            } => {
+                map_entry_handler(container, next_key, val);
+                Ok(AfterNumber::DecodeNext)
+            }
+            Parent::None => Ok(AfterNumber::Finished(val)),
+        }
     }
 
-    Ok(())
+    /// List start state
+    fn list_start(&self, ctx: &mut Ctx) -> Result<AfterListStart> {
+        ctx.next(); // discard 'l'
+        ctx.push_parent(Parent::List {
+            container: Value::List(vec![]),
+        });
+        Ok(AfterListStart::DecodeNext)
+    }
+
+    /// List end state
+    fn list_end(&self, ctx: &mut Ctx) -> Result<AfterListEnd> {
+        ctx.next(); // discard 'e'
+
+        let val = match ctx.pop_parent() {
+            Parent::List { container } => container,
+            _ => todo!(),
+        };
+
+        match ctx.parent() {
+            Parent::List { container } => {
+                list_entry_handler(container, val);
+                Ok(AfterListEnd::DecodeNext)
+            }
+            Parent::Dict {
+                container,
+                next_key,
+            } => {
+                map_entry_handler(container, next_key, val);
+                Ok(AfterListEnd::DecodeNext)
+            }
+            Parent::None => Ok(AfterListEnd::Finished(val)),
+        }
+    }
+
+    /// Dict start state
+    fn dict_start(&self, ctx: &mut Ctx) -> Result<AfterDictStart> {
+        ctx.next(); // discard 'd'
+        ctx.push_parent(Parent::Dict {
+            container: Value::Map(vec![]),
+            next_key: None,
+        });
+        Ok(AfterDictStart::Bytes)
+    }
+
+    /// Dict end state
+    fn dict_end(&self, ctx: &mut Ctx) -> Result<AfterDictEnd> {
+        ctx.next(); // discard 'e'
+
+        let val = match ctx.pop_parent() {
+            Parent::Dict { container, .. } => container,
+            _ => todo!(),
+        };
+
+        match ctx.parent() {
+            Parent::List { container } => {
+                list_entry_handler(container, val);
+                Ok(AfterDictEnd::DecodeNext)
+            }
+            Parent::Dict {
+                container,
+                next_key,
+            } => {
+                map_entry_handler(container, next_key, val);
+                Ok(AfterDictEnd::DecodeNext)
+            }
+            Parent::None => Ok(AfterDictEnd::Finished(val)),
+        }
+    }
+}
+
+/// Helper function for pushing list entries onto the parent list value
+fn list_entry_handler(container: &mut Value, val: Value) {
+    match container {
+        Value::List(e) => e.push(val),
+        _ => todo!(),
+    }
+}
+
+/// Helper function for pushing map entries onto the parent map value
+fn map_entry_handler(container: &mut Value, next_key: &mut Option<Value>, val: Value) {
+    if next_key.is_none() {
+        *next_key = Some(val);
+    } else {
+        let key = match next_key.as_ref().unwrap().clone() {
+            Value::Bytes(b) => b,
+            _ => todo!(),
+        };
+        match container {
+            Value::Map(e) => e.push((key, val)),
+            _ => todo!(),
+        }
+    }
+}
+
+impl DS {
+    /// Run the decoding through the state machine
+    fn run(&mut self, ctx: &mut Ctx) -> Result<Value> {
+        loop {
+            *self = match self {
+                Self::DecodeNext => match self.decode_next(ctx)? {
+                    AfterDecodeNext::Bytes => Self::Bytes,
+                    AfterDecodeNext::Number => Self::Number,
+                    AfterDecodeNext::ListStart => Self::ListStart,
+                    AfterDecodeNext::ListEnd => Self::ListEnd,
+                    AfterDecodeNext::DictStart => Self::DictStart,
+                    AfterDecodeNext::DictEnd => Self::DictEnd,
+                },
+
+                Self::Bytes => match self.bytes(ctx)? {
+                    AfterBytes::DecodeNext => Self::DecodeNext,
+                    AfterBytes::Finished(val) => Self::Finished(val),
+                },
+
+                Self::Number => match self.number(ctx)? {
+                    AfterNumber::DecodeNext => Self::DecodeNext,
+                    AfterNumber::Finished(val) => Self::Finished(val),
+                },
+
+                Self::ListStart => match self.list_start(ctx)? {
+                    AfterListStart::DecodeNext => Self::DecodeNext,
+                },
+
+                Self::ListEnd => match self.list_end(ctx)? {
+                    AfterListEnd::DecodeNext => Self::DecodeNext,
+                    AfterListEnd::Finished(val) => Self::Finished(val),
+                },
+
+                Self::DictStart => match self.dict_start(ctx)? {
+                    AfterDictStart::Bytes => Self::Bytes,
+                },
+
+                Self::DictEnd => match self.dict_end(ctx)? {
+                    AfterDictEnd::DecodeNext => Self::DecodeNext,
+                    AfterDictEnd::Finished(val) => Self::Finished(val),
+                },
+
+                Self::Finished(val) => return Ok(val.clone()),
+            };
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decode_bytes() {
+        assert_eq!(
+            decode(&b"8:Some val".to_vec()).unwrap(),
+            Value::Bytes(b"Some val".to_vec())
+        );
+    }
+
+    #[test]
+    fn decode_list() {
+        assert_eq!(
+            decode(&b"l8:Some val8:Some vale".to_vec()).unwrap(),
+            Value::List(vec![
+                Value::Bytes(b"Some val".to_vec()),
+                Value::Bytes(b"Some val".to_vec()),
+            ]),
+        );
+    }
+
+    #[test]
+    fn decode_dict() {
+        assert_eq!(
+            decode(&b"d8:Some val8:Some vale".to_vec()).unwrap(),
+            Value::Map(vec![(
+                b"Some val".to_vec(),
+                Value::Bytes(b"Some val".to_vec())
+            )]),
+        );
+    }
+
+    #[test]
+    fn decode_multi_level() {
+        assert_eq!(
+            decode(&b"d3:fool8:Some val8:Some valee".to_vec()).unwrap(),
+            Value::Map(vec![(
+                b"foo".to_vec(),
+                Value::List(vec![
+                    Value::Bytes(b"Some val".to_vec()),
+                    Value::Bytes(b"Some val".to_vec()),
+                ])
+            )]),
+        );
+    }
 
     #[test]
     fn test_decode_bytestr() {
