@@ -20,8 +20,8 @@ pub enum Value {
     /// A list of other values of any type
     List(Vec<Value>),
 
-    /// A map of other values of any type, with keys represented as a length prefixed list of bytes
-    Map(Vec<(Vec<u8>, Value)>),
+    /// A dict of other values of any type, with keys represented as a length prefixed list of bytes
+    Dict(Vec<(Vec<u8>, Value)>),
 }
 
 /// Bencode encoder trait
@@ -116,7 +116,7 @@ where
             let val: Value = val.into();
             entries.push((key, val));
         }
-        Value::Map(entries)
+        Value::Dict(entries)
     }
 }
 
@@ -272,7 +272,7 @@ where
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
-            Value::Map(entries) => {
+            Value::Dict(entries) => {
                 let mut res = HashMap::new();
                 for (key, val) in entries {
                     let key = String::from_utf8(key)?;

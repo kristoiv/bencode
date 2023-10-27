@@ -37,6 +37,11 @@ impl<'a> Ctx<'a> {
         Some(n)
     }
 
+    /// Get the current cursor offset from the start of the data buffer
+    fn offset(&self) -> usize {
+        self.idx
+    }
+
     /// Get a reference to the current Parent value
     fn parent(&mut self) -> &mut Parent {
         self.parent_stack
@@ -178,7 +183,12 @@ impl DSHandlers for DS {
                 Parent::Dict { .. } => Ok(AfterDecodeNext::DictEnd),
                 Parent::None => todo!(),
             },
-            _ => Err(anyhow!("unexpected cmd {} ({:#0X})", cmd, cmd as u8)),
+            _ => Err(anyhow!(
+                "unexpected cmd: {} ({:#0X}, offset={})",
+                cmd,
+                cmd as u8,
+                ctx.offset(),
+            )),
         }
     }
 
@@ -190,21 +200,25 @@ impl DSHandlers for DS {
             match n as char {
                 '0'..='9' => buf.push(n),
                 ':' => break,
-                _ => bail!("unexpected input"),
+                _ => bail!(
+                    "unexpected input while parsing length prefix of bytes: {:#0X} (offset={})",
+                    n,
+                    ctx.offset(),
+                ),
             }
         }
 
         let mut len = String::from_utf8(buf)
-            .context("decode bytes length prefix as utf-8 string")?
+            .context("decode length prefix of byte array as utf-8 string")?
             .parse::<usize>()
-            .context("parsing decoded bytes length prefix as usize")?;
+            .context("parsing decoded length prefix of byte array as usize")?;
 
         let mut buf = vec![];
         while len > 0 {
-            buf.push(
-                ctx.next()
-                    .context("unexpected end of data while reading bytes data")?,
-            );
+            buf.push(ctx.next().context(format!(
+                "unexpected end of data while reading byte array data, expecting {} more byte(s)",
+                len,
+            ))?);
             len -= 1;
         }
 
@@ -219,7 +233,7 @@ impl DSHandlers for DS {
                 container,
                 next_key,
             } => {
-                map_entry_handler(container, next_key, val);
+                dict_entry_handler(container, next_key, val);
                 Ok(AfterBytes::DecodeNext)
             }
             Parent::None => Ok(AfterBytes::Finished(val)),
@@ -235,7 +249,11 @@ impl DSHandlers for DS {
             match n as char {
                 '-' | '0'..='9' => buf.push(n),
                 'e' => break,
-                _ => bail!("unexpected input"),
+                _ => bail!(
+                    "unexpected input while parsing number: {:#0X} (offset={})",
+                    n,
+                    ctx.offset(),
+                ),
             }
         }
 
@@ -255,7 +273,7 @@ impl DSHandlers for DS {
                 container,
                 next_key,
             } => {
-                map_entry_handler(container, next_key, val);
+                dict_entry_handler(container, next_key, val);
                 Ok(AfterNumber::DecodeNext)
             }
             Parent::None => Ok(AfterNumber::Finished(val)),
@@ -277,7 +295,7 @@ impl DSHandlers for DS {
 
         let val = match ctx.pop_parent() {
             Parent::List { container } => container,
-            _ => todo!(),
+            _ => panic!("parent value must be Parent::List"),
         };
 
         match ctx.parent() {
@@ -289,7 +307,7 @@ impl DSHandlers for DS {
                 container,
                 next_key,
             } => {
-                map_entry_handler(container, next_key, val);
+                dict_entry_handler(container, next_key, val);
                 Ok(AfterListEnd::DecodeNext)
             }
             Parent::None => Ok(AfterListEnd::Finished(val)),
@@ -300,7 +318,7 @@ impl DSHandlers for DS {
     fn dict_start(&self, ctx: &mut Ctx) -> Result<AfterDictStart> {
         ctx.next(); // discard 'd'
         ctx.push_parent(Parent::Dict {
-            container: Value::Map(vec![]),
+            container: Value::Dict(vec![]),
             next_key: None,
         });
         Ok(AfterDictStart::Bytes)
@@ -312,7 +330,7 @@ impl DSHandlers for DS {
 
         let val = match ctx.pop_parent() {
             Parent::Dict { container, .. } => container,
-            _ => todo!(),
+            _ => panic!("parent value must be Parent::Dict"),
         };
 
         match ctx.parent() {
@@ -324,7 +342,7 @@ impl DSHandlers for DS {
                 container,
                 next_key,
             } => {
-                map_entry_handler(container, next_key, val);
+                dict_entry_handler(container, next_key, val);
                 Ok(AfterDictEnd::DecodeNext)
             }
             Parent::None => Ok(AfterDictEnd::Finished(val)),
@@ -336,22 +354,22 @@ impl DSHandlers for DS {
 fn list_entry_handler(container: &mut Value, val: Value) {
     match container {
         Value::List(e) => e.push(val),
-        _ => todo!(),
+        _ => panic!("parent value's container value must be Value::List"),
     }
 }
 
-/// Helper function for pushing map entries onto the parent map value
-fn map_entry_handler(container: &mut Value, next_key: &mut Option<Value>, val: Value) {
+/// Helper function for pushing dict entries onto the parent dict value
+fn dict_entry_handler(container: &mut Value, next_key: &mut Option<Value>, val: Value) {
     if next_key.is_none() {
         *next_key = Some(val);
     } else {
         let key = match next_key.as_ref().unwrap().clone() {
             Value::Bytes(b) => b,
-            _ => todo!(),
+            _ => panic!("dict entries can only have byte arrays as keys"),
         };
         match container {
-            Value::Map(e) => e.push((key, val)),
-            _ => todo!(),
+            Value::Dict(e) => e.push((key, val)),
+            _ => panic!("parent value's container value must be Value::Dict"),
         }
     }
 }
@@ -461,14 +479,14 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_map() {
-        // Decode map
+    fn test_decode_dict() {
+        // Decode dict
         {
             let val = "d8:Some val5:helloe";
             let res = decode(&val.as_bytes().to_vec()).expect("decoding to be successful");
             assert_eq!(
                 res,
-                Value::Map(vec![(
+                Value::Dict(vec![(
                     "Some val".as_bytes().to_vec(),
                     Value::Bytes("hello".as_bytes().to_vec())
                 )])
@@ -479,9 +497,9 @@ mod tests {
             let res = decode(&val.as_bytes().to_vec()).expect("decoding to be successful");
             assert_eq!(
                 res,
-                Value::Map(vec![(
+                Value::Dict(vec![(
                     "Some val".as_bytes().to_vec(),
-                    Value::Map(vec![(
+                    Value::Dict(vec![(
                         "foo".as_bytes().to_vec(),
                         Value::Bytes("bar".as_bytes().to_vec())
                     ),]),

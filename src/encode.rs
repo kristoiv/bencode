@@ -38,7 +38,7 @@ pub fn encode(val: &Value) -> Result<Vec<u8>> {
             Ok(results.iter().flatten().map(|it| *it).collect::<Vec<u8>>())
         }
 
-        Value::Map(entries) => {
+        Value::Dict(entries) => {
             let mut entries = entries.clone();
             entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
@@ -121,8 +121,8 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_map() {
-        // Encode map
+    fn test_encode_dict() {
+        // Encode dict
         let num_0 = 1337;
         let val_0 = Value::Number(num_0);
 
@@ -132,7 +132,7 @@ mod tests {
         let num_1 = -1337;
         let val_2 = Value::Number(num_1);
 
-        let val = Value::Map(vec![
+        let val = Value::Dict(vec![
             (b"foo".to_vec(), val_0),
             (b"bar".to_vec(), val_1),
             (b"hello".to_vec(), val_2),
