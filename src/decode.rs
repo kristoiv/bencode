@@ -181,7 +181,10 @@ impl DSHandlers for DS {
             'e' => match ctx.parent() {
                 Parent::List { .. } => Ok(AfterDecodeNext::ListEnd),
                 Parent::Dict { .. } => Ok(AfterDecodeNext::DictEnd),
-                Parent::None => todo!(),
+                Parent::None => bail!(
+                    "invalid end of list/dict when not in a list/dict (offset={})",
+                    ctx.offset(),
+                ),
             },
             _ => bail!(
                 "unexpected cmd: {} ({:#0X}, offset={})",
